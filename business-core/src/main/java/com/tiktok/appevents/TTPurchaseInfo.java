@@ -9,9 +9,12 @@ package com.tiktok.appevents;
 import com.tiktok.util.JSON;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
+import org.json.JSONException;
 
 public class TTPurchaseInfo {
     private final JSONObject purchase;
+    private final JSONObject purchaseOfferDetails;
     private final JSONObject skuDetails;
     private String eventId;
     private boolean isAutoTrack;
@@ -32,30 +35,38 @@ public class TTPurchaseInfo {
      * @throws InvalidTTPurchaseInfoException if either the purchase or the skuDetails object are not valid
      *                                        or the productId does not match
      */
-    public TTPurchaseInfo(JSONObject purchase, JSONObject skuDetails) throws InvalidTTPurchaseInfoException {
+    public TTPurchaseInfo(JSONObject purchase, JSONObject purchaseOfferDetails, JSONObject skuDetails) throws InvalidTTPurchaseInfoException {
         if (!isValidPurchase(purchase)) {
             throw new InvalidTTPurchaseInfoException("Not a valid purchase object");
+        }
+        if (!isValidPurchaseOfferDetails(purchaseOfferDetails)) {
+            throw new InvalidTTPurchaseInfoException("Not a valid purchaseOfferDetails object");
         }
         if (!isValidSkuDetails(skuDetails)) {
             throw new InvalidTTPurchaseInfoException("Not a valid skuDetails Object");
         }
 
         String pid = JSON.getString(purchase, "productId");
-        String pidSKU = JSON.getString(skuDetails, "productId");
+        String pidSKU = JSON.getString(purchaseOfferDetails, "productId");
         if (pid != null && !pid.equals(pidSKU)) {
             throw new InvalidTTPurchaseInfoException("Product Id does not match");
         }
         this.purchase = purchase;
+        this.purchaseOfferDetails = purchaseOfferDetails;
         this.skuDetails = skuDetails;
     }
 
-    public TTPurchaseInfo(JSONObject purchase, JSONObject skuDetails, String eventId) throws InvalidTTPurchaseInfoException {
-        this(purchase, skuDetails);
+    public TTPurchaseInfo(JSONObject purchase, JSONObject purchaseOfferDetails, JSONObject skuDetails, String eventId) throws InvalidTTPurchaseInfoException {
+        this(purchase, purchaseOfferDetails, skuDetails);
         this.eventId = eventId;
     }
 
     public JSONObject getPurchase() {
         return purchase;
+    }
+    
+    public JSONObject getPurchaseOfferDetails() {
+        return purchaseOfferDetails;
     }
 
     public JSONObject getSkuDetails() {
@@ -78,22 +89,42 @@ public class TTPurchaseInfo {
         return !purchase.isNull("orderId")
                 && !purchase.isNull("productId");
     }
+    
+//    {
+//        "productId": "games.extradimension.cafemerge.gp.iap.00799.bundle001",
+//            "type": "inapp",
+//            "title": "Bundle Offer (Starbrew Cafe: Mystical Merge)",
+//            "name": "Bundle Offer",
+//            "description": "Bundle Offer",
+//            "localizedIn": [
+//        "en-US"
+//  ],
+//        "skuDetailsToken": "AEuhp4JBft488lCym2eHWoX9UEScJvU0XW4QFe8VSNAiPOQxKvPnQcYY0pbg7pN7gjJXdTKJ1FNRsc4=",
+//            "oneTimePurchaseOfferDetails": {},
+//        "oneTimePurchaseOfferDetailsList": [
+//        {
+//            "priceAmountMicros": 10990000,
+//                "priceCurrencyCode": "CAD",
+//                "formattedPrice": "$10.99",
+//                "offerIdToken": "ATdH1COn85RKhRpBaBJiqM5LfAe1sgPJPT6YNAW6GZqi02eT3dTREioHkx/nWI/n1uwwJbGrAGayYI288/xSxD15Bw==",
+//                "purchaseOptionId": "legacy-base",
+//                "offerTags": []
+//        }
+    private boolean isValidPurchaseOfferDetails(JSONObject purchaseOfferDetails) {
+        return !purchaseOfferDetails.isNull("productId");
+    }
 
-    /**
-     * {
-     * "skuDetailsToken":"blahblah",
-     * "productId":"android.test.purchased",
-     * "type":"inapp",
-     * "price":"₹72.41",
-     * "price_amount_micros":72407614,
-     * "price_currency_code":"INR",
-     * "title":"Sample Title",
-     * "description":"Sample description for product: android.test.purchased."
-     * }
-     */
+//        {
+//            "priceAmountMicros": 10990000,
+//                "priceCurrencyCode": "CAD",
+//                "formattedPrice": "$10.99",
+//                "offerIdToken": "ATdH1COn85RKhRpBaBJiqM5LfAe1sgPJPT6YNAW6GZqi02eT3dTREioHkx/nWI/n1uwwJbGrAGayYI288/xSxD15Bw==",
+//                "purchaseOptionId": "legacy-base",
+//                "offerTags": []
+//        }
     private boolean isValidSkuDetails(JSONObject skuDetails) {
-        return !skuDetails.isNull("price")
-                && !skuDetails.isNull("productId");
+        return !skuDetails.isNull("formattedPrice")
+                && !skuDetails.isNull("priceCurrencyCode");
     }
 
     public String getEventId() {

@@ -29,7 +29,7 @@ class TTInAppPurchaseManager {
                 JSON.putObject(properties, TRACK_TYPE, TRACK_TYPE_AUTO);
             }
 
-            JSON.putObject(properties, "currency", JSON.getString(purchaseInfo.getSkuDetails(), "price_currency_code"));
+            JSON.putObject(properties, "currency", JSON.getString(purchaseInfo.getSkuDetails(), "priceCurrencyCode"));
             JSON.putDouble(properties, "value", getPrice(purchaseInfo.getSkuDetails()));
             JSON.putDouble(properties, "code", JSON.getInt(purchaseInfo.getPurchase(), "purchaseState", 1));
 
@@ -82,10 +82,11 @@ class TTInAppPurchaseManager {
 
             JSON.putObject(content, "content_id", JSON.getString(purchaseInfo.getPurchase(), "productId"));
             JSON.putObject(content, "content_type", purchaseInfo.isSubs() ? "SUB" : "SKU");
+            JSON.putObject(content, "currency", JSON.getString(purchaseInfo.getSkuDetails(), "priceCurrencyCode"));
             JSON.putInt(content, "quantity", JSON.getInt(purchaseInfo.getPurchase(), "quantity"));
             JSON.putDouble(content, "price", getPrice(purchaseInfo.getSkuDetails()));
-            JSON.putObject(content, "title", JSON.getString(purchaseInfo.getSkuDetails(), "title"));
-            JSON.putObject(content, "description", JSON.getString(purchaseInfo.getSkuDetails(), "description"));
+            JSON.putObject(content, "title", JSON.getString(purchaseInfo.getPurchaseOfferDetails(), "title"));
+            JSON.putObject(content, "description", JSON.getString(purchaseInfo.getPurchaseOfferDetails(), "description"));
             JSON.putObject(content, "subscription_period", JSON.getString(purchaseInfo.getSkuDetails(), "subscriptionPeriod"));
             JSON.putInt(content, "subscription_period_number", JSON.getInt(purchaseInfo.getSkuDetails(), "subscriptionPeriodNumber"));
             JSON.putObject(content, "free_trial_period", JSON.getString(purchaseInfo.getSkuDetails(), "freeTrialPeriod"));
@@ -114,7 +115,7 @@ class TTInAppPurchaseManager {
     private static double getPrice(JSONObject skuDetails) {
         double price = 0;
         try {
-            price = BigDecimal.valueOf(JSON.getLong(skuDetails, "price_amount_micros", 0) / 1000000.0).doubleValue();
+            price = BigDecimal.valueOf(JSON.getLong(skuDetails, "priceAmountMicros", 0) / 1000000.0).doubleValue();
         } catch (Throwable ignored) {
         }
         return price;

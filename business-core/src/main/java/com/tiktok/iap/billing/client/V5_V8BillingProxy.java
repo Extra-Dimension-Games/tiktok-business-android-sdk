@@ -8,6 +8,7 @@ import androidx.annotation.Nullable;
 import com.android.billingclient.api.BillingClient;
 import com.android.billingclient.api.BillingClientStateListener;
 import com.android.billingclient.api.BillingResult;
+import com.android.billingclient.api.PendingPurchasesParams;
 import com.android.billingclient.api.ProductDetails;
 import com.android.billingclient.api.ProductDetailsResponseListener;
 import com.android.billingclient.api.Purchase;
@@ -54,7 +55,7 @@ class V5_V8BillingProxy implements IBillingProxy {
 
     private final PurchasesUpdatedListener mUpdateListener = new PurchasesUpdatedListener() {
         @Override
-        public void onPurchasesUpdated(@NonNull BillingResult billingResult, @Nullable List<Purchase> list) {
+        public void onPurchasesUpdated(@NonNull BillingResult billingResult, @Nullable List<Purchase> list) {            
             sendPageShow(billingResult, list);
             sendPurchase(billingResult, list);
 
@@ -87,45 +88,62 @@ class V5_V8BillingProxy implements IBillingProxy {
                 if (purchase == null) {
                     continue;
                 }
-                List<String> skus = purchase.getSkus();
-                if (skus == null || skus.isEmpty()) {
+                List<String> products = purchase.getProducts();
+                if (products == null || products.isEmpty()) {
                     continue;
                 }
-                querySkuAndTrack(skus, purchase, true);
+                querySkuAndTrack(products, purchase, true);
             }
         }
     }
 
     private void querySkuAndTrack(List<String> skus, Purchase purchase, boolean isInAppPurchase) {
-        try {
-            List<String> skuList = new ArrayList<>();
+        try {            
+            List<QueryProductDetailsParams.Product> productList = new ArrayList<QueryProductDetailsParams.Product>();
             for (String sku : skus) {
                 if (sku == null || sku.isEmpty()) {
                     continue;
                 }
-                skuList.add(sku);
+                
+                QueryProductDetailsParams.Product.Builder productParams = QueryProductDetailsParams.Product.newBuilder();
+                if (isInAppPurchase) {
+                    productParams.setProductId(sku).setProductType(BillingClient.SkuType.INAPP);
+                } else {
+                    productParams.setProductId(sku).setProductType(BillingClient.SkuType.SUBS);
+                }
+                productList.add(productParams.build());
             }
-            SkuDetailsParams.Builder params = SkuDetailsParams.newBuilder();
-            if (isInAppPurchase) {
-                params.setSkusList(skuList).setType(BillingClient.SkuType.INAPP);
-            } else {
-                params.setSkusList(skuList).setType(BillingClient.SkuType.SUBS);
-            }
-            mBillingClient.querySkuDetailsAsync(params.build(), (billingResult, skuDetailsList) -> {
+                        
+            QueryProductDetailsParams.Builder params = QueryProductDetailsParams.newBuilder();
+            params.setProductList(productList);
+            
+            mBillingClient.queryProductDetailsAsync(params.build(), (billingResult, productDetailsResult) -> {
                 try {
                     if (billingResult != null && billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK
-                            && skuDetailsList != null) {
-                        if (skuDetailsList.size() > 0) {
+                            && productDetailsResult != null) {
+                        List<ProductDetails> productDetailsList = productDetailsResult.getProductDetailsList();
+                        if (productDetailsList.size() > 0) {
                             List<TTPurchaseInfo> purchaseInfos = new ArrayList<>();
                             try {
-                                for (SkuDetails skuDetails : skuDetailsList) {
+                                for (ProductDetails productDetails : productDetailsList) {
                                     try {
-                                        TTPurchaseInfo purchaseInfo = new TTPurchaseInfo(JSON.build(purchase.getOriginalJson()),
-                                                JSON.build(skuDetails.getOriginalJson()));
+                                        ttLogger.info("querySkuAndTrack: productDetails " + productDetails.toString());
+                                        
+                                        JSONObject purchaseOfferDetails = JSON.build(BillUtils.parserJsonFromProductDetail(productDetails.toString()));
+                                        JSONObject skuDetails = JSON.build();
+                                        if (purchaseOfferDetails.has("oneTimePurchaseOfferDetailsList")) {
+                                            JSONArray offerDetailsList = purchaseOfferDetails.getJSONArray("oneTimePurchaseOfferDetailsList");
+                                            if (offerDetailsList.length() > 0) {
+                                                skuDetails = offerDetailsList.getJSONObject(0);
+                                            }
+                                        }
+                                        
+                                        TTPurchaseInfo purchaseInfo = new TTPurchaseInfo(JSON.build(purchase.getOriginalJson()), purchaseOfferDetails, skuDetails);
                                         purchaseInfo.setAutoTrack(true);
                                         purchaseInfo.setSubs(!isInAppPurchase);
                                         purchaseInfos.add(purchaseInfo);
                                     } catch (Throwable ignore) {
+                                        ttLogger.error(ignore, "Error building purchaseInfo");
                                     }
                                 }
                                 TikTokBusinessSdk.trackGooglePlayPurchase(purchaseInfos);
@@ -207,44 +225,44 @@ class V5_V8BillingProxy implements IBillingProxy {
     }
 
     private void doQueryPurchaseHistory() {
-        try {
-            if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackINAPP()) {
-                QueryPurchaseHistoryParams paramsINAPP = QueryPurchaseHistoryParams.newBuilder()
-                        .setProductType(BillingClient.ProductType.INAPP)
-                        .build();
-                mBillingClient.queryPurchaseHistoryAsync(paramsINAPP, new PurchaseHistoryResponseListener() {
-                    @Override
-                    public void onPurchaseHistoryResponse(@NonNull BillingResult billingResult, @Nullable List<PurchaseHistoryRecord> list) {
-                        if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackINAPP()) {
-                            queryProductDetailHistory(false, list);
-                        }
-                    }
-                });
-            }
-        } catch (Throwable e) {
-            ttLogger.error(e, "query h inapp error");
-        }
-
-
-        try {
-            if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackSUBS()) {
-                QueryPurchaseHistoryParams paramsSUBS = QueryPurchaseHistoryParams.newBuilder()
-                        .setProductType(BillingClient.ProductType.SUBS)
-                        .build();
-                mBillingClient.queryPurchaseHistoryAsync(paramsSUBS, new PurchaseHistoryResponseListener() {
-                    @Override
-                    public void onPurchaseHistoryResponse(@NonNull BillingResult billingResult, @Nullable List<PurchaseHistoryRecord> list) {
-                        if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
-                            if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackSUBS()) {
-                                queryProductDetailHistory(true, list);
-                            }
-                        }
-                    }
-                });
-            }
-        } catch (Throwable e) {
-            ttLogger.error(e, "query h subs error");
-        }
+//         try {
+//             if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackINAPP()) {
+//                 QueryPurchaseHistoryParams paramsINAPP = QueryPurchaseHistoryParams.newBuilder()
+//                         .setProductType(BillingClient.ProductType.INAPP)
+//                         .build();
+//                 mBillingClient.queryPurchaseHistoryAsync(paramsINAPP, new PurchaseHistoryResponseListener() {
+//                     @Override
+//                     public void onPurchaseHistoryResponse(@NonNull BillingResult billingResult, @Nullable List<PurchaseHistoryRecord> list) {
+//                         if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackINAPP()) {
+//                             queryProductDetailHistory(false, list);
+//                         }
+//                     }
+//                 });
+//             }
+//         } catch (Throwable e) {
+//             ttLogger.error(e, "query h inapp error");
+//         }
+// 
+// 
+//         try {
+//             if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackSUBS()) {
+//                 QueryPurchaseHistoryParams paramsSUBS = QueryPurchaseHistoryParams.newBuilder()
+//                         .setProductType(BillingClient.ProductType.SUBS)
+//                         .build();
+//                 mBillingClient.queryPurchaseHistoryAsync(paramsSUBS, new PurchaseHistoryResponseListener() {
+//                     @Override
+//                     public void onPurchaseHistoryResponse(@NonNull BillingResult billingResult, @Nullable List<PurchaseHistoryRecord> list) {
+//                         if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+//                             if (TTInAppPurchaseWrapper.autoTrackPaymentHistory && TTInAppPurchaseWrapper.canTrackSUBS()) {
+//                                 queryProductDetailHistory(true, list);
+//                             }
+//                         }
+//                     }
+//                 });
+//             }
+//         } catch (Throwable e) {
+//             ttLogger.error(e, "query h subs error");
+//         }
     }
 
     private void queryProductDetailHistory(boolean isSubs, List<PurchaseHistoryRecord> list) {
@@ -333,7 +351,7 @@ class V5_V8BillingProxy implements IBillingProxy {
                     JSONObject sku = mProductDetails.get(pid);
                     if (sku != null && sku.length() > 0) {
                         checkDataAndAddNeedParam(payData.data, sku);
-                        TTPurchaseInfo info = new TTPurchaseInfo(payData.data, sku);
+                        TTPurchaseInfo info = new TTPurchaseInfo(payData.data, payData.data, sku);
                         info.setAutoTrack(true);
                         info.setSubs(isSubs);
                         list.add(info);
@@ -426,46 +444,46 @@ class V5_V8BillingProxy implements IBillingProxy {
     }
 
     private void doQueryProductDetails(boolean isSubs, List<String> idList) {
-        if (idList == null || idList.isEmpty()) {
-            return;
-        }
-
-        List<QueryProductDetailsParams.Product> products = new ArrayList<>();
-        for (String pid : idList) {
-            QueryProductDetailsParams.Product product = QueryProductDetailsParams.Product.newBuilder()
-                    .setProductType(isSubs ? BillingClient.ProductType.SUBS : BillingClient.ProductType.INAPP)
-                    .setProductId(pid)
-                    .build();
-            products.add(product);
-        }
-
-        QueryProductDetailsParams params = QueryProductDetailsParams.newBuilder()
-                .setProductList(products)
-                .build();
-        mBillingClient.queryProductDetailsAsync(params, new ProductDetailsResponseListener() {
-            @Override
-            public void onProductDetailsResponse(@NonNull BillingResult billingResult, @NonNull List<ProductDetails> list) {
-                if (billingResult != null && billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
-                    if (list != null && !list.isEmpty()) {
-                        for (ProductDetails detail : list) {
-                            try {
-                                if (detail != null) {
-                                    String jsonStr = BillUtils.parserJsonFromProductDetail(detail.toString());
-                                    JSONObject json = JSON.build(jsonStr);
-                                    if (json != null && json.length() > 0) {
-                                        checkDataAndAddNeedParam(null, json);
-                                        mProductDetails.put(detail.getProductId(), json);
-                                    }
-                                }
-                            } catch (Throwable ignore) {
-                            }
-                        }
-
-                        tryUploadHistoryLog();
-                    }
-                }
-            }
-        });
+//         if (idList == null || idList.isEmpty()) {
+//             return;
+//         }
+// 
+//         List<QueryProductDetailsParams.Product> products = new ArrayList<>();
+//         for (String pid : idList) {
+//             QueryProductDetailsParams.Product product = QueryProductDetailsParams.Product.newBuilder()
+//                     .setProductType(isSubs ? BillingClient.ProductType.SUBS : BillingClient.ProductType.INAPP)
+//                     .setProductId(pid)
+//                     .build();
+//             products.add(product);
+//         }
+// 
+//         QueryProductDetailsParams params = QueryProductDetailsParams.newBuilder()
+//                 .setProductList(products)
+//                 .build();
+//         mBillingClient.queryProductDetailsAsync(params, new ProductDetailsResponseListener() {
+//             @Override
+//             public void onProductDetailsResponse(@NonNull BillingResult billingResult, @NonNull List<ProductDetails> list) {
+//                 if (billingResult != null && billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+//                     if (list != null && !list.isEmpty()) {
+//                         for (ProductDetails detail : list) {
+//                             try {
+//                                 if (detail != null) {
+//                                     String jsonStr = BillUtils.parserJsonFromProductDetail(detail.toString());
+//                                     JSONObject json = JSON.build(jsonStr);
+//                                     if (json != null && json.length() > 0) {
+//                                         checkDataAndAddNeedParam(null, json);
+//                                         mProductDetails.put(detail.getProductId(), json);
+//                                     }
+//                                 }
+//                             } catch (Throwable ignore) {
+//                             }
+//                         }
+// 
+//                         tryUploadHistoryLog();
+//                     }
+//                 }
+//             }
+//         });
     }
 
     private boolean isStartSuccess() {
@@ -482,7 +500,7 @@ class V5_V8BillingProxy implements IBillingProxy {
         try {
             mBillingClient = BillingClient.newBuilder(TikTokBusinessSdk.getApplicationContext())
                     .setListener(mUpdateListener)
-                    .enablePendingPurchases()
+                    .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
                     .build();
             mBillingClient.startConnection(new BillingClientStateListener() {
                 @Override
